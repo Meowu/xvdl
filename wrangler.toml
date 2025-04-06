@@ -1,0 +1,6 @@
+name = "xvdl"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-04-06"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
