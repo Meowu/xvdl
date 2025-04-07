@@ -3,6 +3,9 @@ name = "xvdl"
 version = "0.1.0"
 edition = "2021"
 authors = ["Meowu <474384902@qq.com>"]
+license = "MIT"
+description = "A Rust library for downloading X/Twitter videos."
+repository = "https://github.com/Meowu/xvdl"
 
 [package.metadata.release]
 release = false
