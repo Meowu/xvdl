@@ -38,7 +38,11 @@ async fn handler(video_url: &str) -> Result<String> {
     let body = ValidateRequest {
         url: video_url.to_string(),
     };
-    let client = reqwest::Client::new();
+    // let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        .build()
+        .expect("Failed to build reqwest client");
 
     let validate_resp = client
         .post(validate_url)
