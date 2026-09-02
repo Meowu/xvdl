@@ -1,123 +1,105 @@
-use gloo_timers::future::sleep;
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use serde::Deserialize;
 use worker::*;
 
-#[derive(Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum DownloadStatus {
-    Error,
-    Finished,
-}
+const FXTWITTER_API: &str = "https://api.fxtwitter.com/status";
 
-#[derive(Serialize)]
-struct ValidateRequest {
-    url: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ValidateResponse {
-    status: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RequestResponse {
-    #[serde(rename = "_id")]
-    job_id: String,
+#[derive(Debug, Deserialize)]
+struct FxTwitterResponse {
+    code: u16,
+    message: String,
+    tweet: Option<Tweet>,
 }
 
 #[derive(Debug, Deserialize)]
-struct DownloadResponse {
-    status: DownloadStatus,
-    host: Option<String>,
-    filename: Option<String>,
+struct Tweet {
+    media: Option<Media>,
 }
 
-async fn handler(video_url: &str) -> Result<String> {
-    let validate_url = "https://api.x-downloader.com/validate";
-    let body = ValidateRequest {
-        url: video_url.to_string(),
-    };
-    // let client = reqwest::Client::new();
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-        .build()
-        .expect("Failed to build reqwest client");
+#[derive(Debug, Deserialize)]
+struct Media {
+    #[serde(default)]
+    videos: Vec<Video>,
+}
 
-    let validate_resp = client
-        .post(validate_url)
-        .json(&body)
+#[derive(Debug, Deserialize)]
+struct Video {
+    url: String,
+}
+
+fn status_id(video_url: &str) -> Option<&str> {
+    let (_, tail) = video_url.split_once("/status/")?;
+    let id = tail
+        .split(|character| matches!(character, '/' | '?' | '#'))
+        .next()?;
+
+    (!id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())).then_some(id)
+}
+
+async fn video_urls(video_url: &str) -> Result<Vec<String>> {
+    let id =
+        status_id(video_url).ok_or_else(|| Error::RustError("Invalid X status URL".to_string()))?;
+    let client = reqwest::Client::builder()
+        .user_agent("xvdl/0.1.0 (https://github.com/Meowu/xvdl)")
+        .build()
+        .map_err(|error| Error::RustError(format!("Failed to build HTTP client: {error}")))?;
+
+    let response = client
+        .get(format!("{FXTWITTER_API}/{id}"))
         .send()
         .await
-        .map_err(|e| Error::RustError(format!("Failed to parse validation response:: {}", e)))?;
-
-    let validate_data: ValidateResponse = validate_resp
-        .json()
+        .map_err(|error| Error::RustError(format!("Failed to fetch post metadata: {error}")))?;
+    let http_status = response.status();
+    let response_body = response
+        .text()
         .await
-        .map_err(|e| Error::RustError(format!("Faile to parse validation response: {}", e)))?;
+        .map_err(|error| Error::RustError(format!("Failed to read metadata response: {error}")))?;
 
-    if validate_data.status == "error" {
-        return Err(Error::RustError("Invalid x video url.".to_string()));
+    if !http_status.is_success() {
+        return Err(Error::RustError(format!(
+            "Metadata service returned HTTP {http_status}: {response_body}"
+        )));
     }
 
-    let request_url = "https://api.x-downloader.com/request";
+    let data: FxTwitterResponse = serde_json::from_str(&response_body).map_err(|error| {
+        Error::RustError(format!(
+            "Failed to parse metadata response: {error}; response: {response_body}"
+        ))
+    })?;
 
-    let resquest_resp = client
-        .post(request_url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| Error::RustError(format!("Request job failed: {}", e)))?;
+    if data.code != 200 {
+        return Err(Error::RustError(format!(
+            "Metadata service failed ({}): {}",
+            data.code, data.message
+        )));
+    }
 
-    let request_data: RequestResponse = resquest_resp
-        .json()
-        .await
-        .map_err(|e| Error::RustError(format!("Failed to parse request response: {}", e)))?;
+    let urls = data
+        .tweet
+        .and_then(|tweet| tweet.media)
+        .map(|media| {
+            media
+                .videos
+                .into_iter()
+                .map(|video| video.url)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
-    let job_id = request_data.job_id;
+    if urls.is_empty() {
+        return Err(Error::RustError("No videos found in this post".to_string()));
+    }
 
-    // poll for job status.
-    // for _ in 0..30 {}
-    let file_url = loop {
-        let download_api = "https://api.x-downloader.com/download";
-        let download_resp = client
-            .get(format!("{}/{}", download_api, job_id))
-            .send()
-            .await
-            .map_err(|e| Error::RustError(format!("Download status check failed: {}", e)))?;
-
-        let download_data: DownloadResponse = download_resp
-            .json()
-            .await
-            .map_err(|e| Error::RustError(format!("Failed to parse download response: {}", e)))?;
-
-        if download_data.status == DownloadStatus::Error {
-            return Err(Error::RustError("Download job failed".to_string()));
-        }
-
-        if download_data.status == DownloadStatus::Finished {
-            if let (Some(host), Some(filename)) = (download_data.host, download_data.filename) {
-                break format!("https://{}/{}", host, filename);
-            } else {
-                return Err(Error::RustError(
-                    "Download finished but host or filename missing".to_string(),
-                ));
-            }
-        }
-
-        sleep(Duration::from_secs(2)).await;
-    };
-
-    Ok(file_url)
+    Ok(urls)
 }
 
 #[event(fetch)]
 async fn fetch(req: Request, _env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
-    let path = req.path().to_string();
+    let path = req.path();
     let video_url = path.strip_prefix('/').unwrap_or(&path);
+
     if video_url.is_empty() {
-        return Response::error("No URL privided", 400);
+        return Response::error("No URL provided", 400);
     }
 
     if !video_url.contains("x.com") && !video_url.contains("twitter.com") {
@@ -126,9 +108,28 @@ async fn fetch(req: Request, _env: Env, _ctx: Context) -> Result<Response> {
             400,
         );
     }
-    println!("Video url: {}", video_url);
-    match handler(video_url).await {
-        Ok(result) => Response::ok(result),
-        Err(err) => Response::error(err.to_string(), 500),
+
+    match video_urls(video_url).await {
+        Ok(urls) => Response::from_json(&urls),
+        Err(error) => Response::error(error.to_string(), 502),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::status_id;
+
+    #[test]
+    fn extracts_status_id_with_query_string() {
+        assert_eq!(
+            status_id("https://x.com/DuoHong44622/status/2094259883487133792?s=20"),
+            Some("2094259883487133792")
+        );
+    }
+
+    #[test]
+    fn rejects_non_status_urls_and_non_numeric_ids() {
+        assert_eq!(status_id("https://x.com/DuoHong44622"), None);
+        assert_eq!(status_id("https://x.com/user/status/not-an-id"), None);
     }
 }

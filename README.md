@@ -6,7 +6,7 @@ A Rust-based Cloudflare Workers service that generates direct download links for
 
 ## Features
 
-- Generate direct download links for X.com/Twitter videos
+- Generate direct download links for every video in an X.com/Twitter post
 - Fast and efficient using Rust and Cloudflare Workers
 - Simple REST API with easy integration
 - Serverless deployment via Cloudflare Workers
@@ -46,7 +46,8 @@ Send an HTTP request to your deployed Cloudflare Worker with the X/Twitter URL p
 https://your-worker-subdomain.workers.dev/https://x.com/username/status/1234567890
 ```
 
-The service will return a direct download URL to the video if successful.
+The service returns a JSON array containing the direct download URL of every
+video in the post.
 
 ### Example
 
@@ -57,7 +58,10 @@ GET https://your-worker-subdomain.workers.dev/https://x.com/username/status/1234
 
 Successful Response:
 ```
-https://video-host.com/path/to/video.mp4
+[
+  "https://video.twimg.com/path/to/video-1.mp4",
+  "https://video.twimg.com/path/to/video-2.mp4"
+]
 ```
 
 Error Response (400 Bad Request):
@@ -109,7 +113,7 @@ The request is a simple HTTP GET with the Twitter URL as the path.
 
 ### Response Format
 
-- On success: A plain text response containing the direct download URL
+- On success: A JSON array containing one or more direct download URLs
 - On error: An error message with appropriate HTTP status code (400 for invalid requests, 500 for server errors)
 
 ## Dependencies and Technologies
