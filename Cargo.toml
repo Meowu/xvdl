@@ -2,9 +2,10 @@
 name = "xvdl"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.85"
 authors = ["Meowu <474384902@qq.com>"]
 license = "MIT"
-description = "A Rust library for downloading X/Twitter videos."
+description = "Read public X/Twitter posts and conversations without an API token."
 repository = "https://github.com/Meowu/xvdl"
 
 [package.metadata.release]
@@ -15,12 +16,30 @@ release = false
 wasm-opt = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-worker = { version = "0.8.5", features = ['http', 'axum'] }
-worker-macros = { version = "0.5.0", features = ['http'] }
-console_error_panic_hook = { version = "0.1.7" }
-reqwest = { version = "0.13.4", features = ["json"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+html-escape = "0.2"
+regex = "1.11"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0"
+thiserror = "2.0"
+url = "2.5"
+
+# reqwest uses the browser/Worker Fetch API on wasm, while the CLI needs a TLS
+# implementation on native platforms. Keeping the target-specific features here
+# prevents native-only networking code from entering the Worker bundle.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
+worker = { version = "0.8.5", features = ["http"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = { version = "4.5", features = ["derive"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
+tokio = { version = "1.44", features = ["fs", "io-util", "macros", "rt", "time"] }
+
+[[bin]]
+name = "xread"
+path = "src/main.rs"

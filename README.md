@@ -1,138 +1,157 @@
-# XVDL - X/Twitter Video Downloader
+# xread (Rust)
 
-[English](README.md) | [简体中文](README_zh.md)
+English | [简体中文](README_zh.md)
 
-A Rust-based Cloudflare Workers service that generates direct download links for videos from X.com (formerly Twitter).
+A token-free reader for public X/Twitter content. One Rust core powers a reusable library, a native CLI, and a Cloudflare Worker.
+
+Structured data comes from the free third-party [FxTwitter](https://github.com/FixTweet/FxTwitter) service. Text reads fall back to X's token-free oEmbed endpoint. The Bearer-token API, `--api`, and `--archive` paths from `xread.mjs` are intentionally omitted.
 
 ## Features
 
-- Generate direct download links for every video in an X.com/Twitter post
-- Fast and efficient using Rust and Cloudflare Workers
-- Simple REST API with easy integration
-- Serverless deployment via Cloudflare Workers
-- Handles both x.com and twitter.com URLs
+- LLM-oriented, compact Markdown by default in the CLI
+- Normal posts, long posts, Articles, quotes, reposts, and optional replies
+- Expanded links, media descriptions, and normalized structured data
+- Article headings, lists, quotes, inline styles, links, and images in document order
+- One MP4 per video/GIF with `best`, `worst`, or target-resolution selection
+- Native streaming downloads for all videos or one selected video
+- JSON, Markdown, plain-text, and detailed human views
+- Shared timeout, retry, fallback, and validation behavior across adapters
 
-## Installation
+Free replies contain only the first ranked/recent page and are not a complete archive. Diagnostics go to `stderr`; semantic limitations remain in Markdown when they affect how the content should be interpreted.
 
-### Prerequisites
+The compact view omits image URLs from ordinary posts, where they are usually noise for an LLM. Article cover and body images are different: they are part of the document and remain as standard Markdown images at their original positions. JSON also exposes normalized Article media in `article.media`.
 
-- [Rust](https://www.rust-lang.org/tools/install) and Cargo
-- [Node.js](https://nodejs.org/) and npm (for Cloudflare Wrangler)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (Cloudflare Workers CLI)
+## CLI
 
-### Setup
+Rust 1.85 or newer is required.
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/xvdl.git
-   cd xvdl
-   ```
+```bash
+cargo install --path .
 
-2. Install dependencies:
-   ```bash
-   cargo build
-   ```
+# Compact Markdown by default
+xread https://x.com/Interior/status/463440424141459456
 
-3. Install the worker-build tool:
-   ```bash
-   cargo install worker-build
-   ```
+# Read a URL or text from stdin
+printf '%s\n' 'https://x.com/Interior/status/463440424141459456' | xread -
 
-## Usage
+# Other content views
+xread 463440424141459456 --format text
+xread 463440424141459456 --format json
+xread 463440424141459456 --json --pretty
+xread 463440424141459456 --format human
 
-Send an HTTP request to your deployed Cloudflare Worker with the X/Twitter URL path:
-
-```
-https://your-worker-subdomain.workers.dev/https://x.com/username/status/1234567890
+# Replies
+xread 463440424141459456 --replies --limit 50
+xread 463440424141459456 --thread --sort recent
 ```
 
-The service returns a JSON array containing the direct download URL of every
-video in the post.
+Formats:
 
-### Example
+| Format | Intended use |
+|---|---|
+| `markdown` / `md` | Default LLM input: content, provenance, media summary, best video URLs, semantic notes |
+| `text` / `txt` | Minimal body, quote/repost content, and requested replies |
+| `json` | Complete normalized contract; compact unless `--pretty` is used |
+| `human` | Detailed terminal view including metrics, media URLs, and source |
 
-Request:
-```
-GET https://your-worker-subdomain.workers.dev/https://x.com/username/status/1234567890
-```
+`--quiet` suppresses warnings and download progress on `stderr`, but never content, selected URLs, downloaded paths, or errors.
 
-Successful Response:
-```
-[
-  "https://video.twimg.com/path/to/video-1.mp4",
-  "https://video.twimg.com/path/to/video-2.mp4"
-]
-```
+## Video URLs and downloads
 
-Error Response (400 Bad Request):
+```bash
+# One best-bitrate MP4 per video, one URL per line
+xread POST_URL --videos
 
-```
-Invalid X URL. Only x.com and twitter.com URLs are supported.
-```
+# Highest representation no larger than a 720-pixel short edge
+xread POST_URL --videos --quality 720
 
-Error Response (500 Internal Server Error):
+# Only the second video at the lowest available bitrate
+xread POST_URL --videos --quality worst --video 2
 
-```
-Download job failed
-```
+# Stream all videos to disk
+xread POST_URL --download --output-dir ./videos
 
-## Deployment
-
-To deploy the service to Cloudflare Workers:
-
-1. Log in to Cloudflare using Wrangler:
-
-   ```bash
-   wrangler login
-   ```
-
-2. Build and deploy the service:
-
-   ```bash
-   wrangler publish
-   ```
-
-3. Your service will be available at `https://xvdl.your-account.workers.dev/`
-
-
-## API Documentation
-
-### Endpoint
-
-The API has a single endpoint that accepts X/Twitter URLs:
-
-```
-GET /{twitter_url}
+# Download one representation; existing files require explicit replacement
+xread POST_URL --download --video 1 --quality 720 --output-dir ./videos --force
 ```
 
-Where `{twitter_url}` is a complete URL to an X/Twitter post containing a video.
+Files are named `<username>-<post-id>-<index>.mp4`. Downloads are streamed into a private `.part` file and renamed only after completion, so large files are not buffered in memory and interrupted downloads do not look complete.
 
-### Request Format
+Run `xread --help` for all options. Use `--community-base` or `XREAD_COMMUNITY_BASE_URL` for a self-hosted FxTwitter v2 instance.
 
-The request is a simple HTTP GET with the Twitter URL as the path.
+## Rust library
 
-### Response Format
+```rust,no_run
+use xvdl::{render_markdown, ReadOptions, ReaderConfig, VideoQuality, XReader};
 
-- On success: A JSON array containing one or more direct download URLs
-- On error: An error message with appropriate HTTP status code (400 for invalid requests, 500 for server errors)
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let reader = XReader::new(ReaderConfig::default())?;
+    let result = reader
+        .read("463440424141459456", &ReadOptions::default())
+        .await?;
+    println!("{}", render_markdown(&result));
 
-## Dependencies and Technologies
+    let videos = reader
+        .video_urls_with_quality("463440424141459456", VideoQuality::Height(720))
+        .await?;
+    println!("{videos:?}");
+    Ok(())
+}
+```
 
-- [Rust](https://www.rust-lang.org/) - Programming language
-- [Cloudflare Workers](https://workers.cloudflare.com/) - Serverless platform
-- [worker-rs](https://github.com/cloudflare/workers-rs) - Rust bindings for Cloudflare Workers
-- [reqwest](https://github.com/seanmonstar/reqwest) - HTTP client for Rust
-- [serde](https://github.com/serde-rs/serde) - Serialization framework for Rust
+`XReader::video_urls` remains the shorthand for `VideoQuality::Best`. Native builds expose a silent `download_videos` plus `download_videos_with_progress` for callers that want to render `DownloadEvent`s themselves. Filesystem APIs are excluded from WASM builds.
+
+## Cloudflare Worker
+
+```bash
+worker-build --release
+npx wrangler dev
+npx wrangler deploy
+```
+
+Use an encoded query parameter when passing a full URL:
+
+```text
+GET /read?url=463440424141459456
+GET /read?url=463440424141459456&format=markdown
+GET /read?url=463440424141459456&replies=thread&sort=recent&format=text
+GET /videos?url=463440424141459456&quality=720&video=1
+GET /health
+```
+
+The Worker keeps JSON as its default for HTTP compatibility. `format=markdown|md` returns `text/markdown`; `format=text|txt` and `format=human` return `text/plain`. Video routes support the same formats. The legacy `GET /https://x.com/user/status/123` form still returns a JSON URL array.
+
+Supported query parameters are:
+
+- reading: `url`, `replies=direct|replies|thread`, `limit=1..1000`, `sort=relevance|recent`, and `lang`;
+- rendering: `format=json|markdown|text|human`;
+- video selection: `quality=best|worst|144..4320` and one-based `video`.
+
+The Worker does not proxy `/download`: large media transfer is better performed by the client after calling `/videos`. Public callers cannot override the upstream base URL, which avoids turning the Worker into an SSRF proxy. Deployers may configure `XREAD_COMMUNITY_BASE_URL`, `XREAD_TIMEOUT_MS`, and `XREAD_RETRIES`.
+
+## Architecture
+
+```text
+CLI ─────┐
+         ├─> XReader ─> FxTwitter v2 ─> Post / ReadResult ─> Markdown/Text/JSON/Human
+Worker ──┘       │
+                 └─ text fallback ─> X oEmbed
+
+CLI download ─> structured Post ─> select MP4 ─> stream to .part ─> rename
+```
+
+The focused modules are `model` (stable types and policies), `parse` (safe input parsing), `client` (HTTP and fallback), `normalize` (loose upstream JSON to typed data), `render` (output views), and native-only `download`. `main.rs` and the Worker adapter in `lib.rs` remain thin protocol layers.
+
+## Verification
+
+```bash
+cargo fmt --all --check
+cargo test
+cargo clippy --all-targets -- -D warnings
+worker-build --release
+```
 
 ## License
 
 MIT
-
-
-## Author
-
-- Meowu (474384902@qq.com)
-
-## Contribution
-
-Contributions are welcome! Please feel free to submit a Pull Request.
