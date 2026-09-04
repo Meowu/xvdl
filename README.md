@@ -113,6 +113,7 @@ npx wrangler deploy
 Use an encoded query parameter when passing a full URL:
 
 ```text
+GET /
 GET /read?url=463440424141459456
 GET /read?url=463440424141459456&format=markdown
 GET /read?url=463440424141459456&replies=thread&sort=recent&format=text
@@ -120,7 +121,9 @@ GET /videos?url=463440424141459456&quality=720&video=1
 GET /health
 ```
 
-The Worker keeps JSON as its default for HTTP compatibility. `format=markdown|md` returns `text/markdown`; `format=text|txt` and `format=human` return `text/plain`. Video routes support the same formats. The legacy `GET /https://x.com/user/status/123` form still returns a JSON URL array.
+Opening `/` returns compact, plain-text `--help` output with endpoints, options, and examples. Machine-readable service discovery remains available at `/?format=json` and from `/read` without a URL.
+
+The Worker keeps JSON as its default for API reads. `format=markdown|md` returns `text/markdown`; `format=text|txt` and `format=human` return `text/plain`. Video routes support the same formats. The legacy `GET /https://x.com/user/status/123` form still returns a JSON URL array.
 
 Supported query parameters are:
 

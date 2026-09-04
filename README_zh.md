@@ -171,6 +171,7 @@ npx wrangler deploy
 推荐把 URL 放在经过编码的 query 参数中：
 
 ```text
+GET /
 GET /read?url=463440424141459456
 GET /read?url=463440424141459456&format=markdown
 GET /read?url=463440424141459456&replies=thread&sort=recent&format=text
@@ -178,7 +179,9 @@ GET /videos?url=463440424141459456&quality=720&video=1
 GET /health
 ```
 
-Worker 为保持 API 兼容，默认仍返回 JSON；`format=markdown|md` 返回 `text/markdown`，`format=text|txt` 和 `format=human` 返回 `text/plain`。视频接口也支持这四种格式。旧形式 `GET /https://x.com/user/status/123` 继续返回视频 URL JSON 数组。
+直接打开 `/` 会返回类似 `--help` 的紧凑纯文本，其中包含接口、参数和示例。程序需要机器可读的服务说明时，使用 `/?format=json`，或访问没有 `url` 参数的 `/read`。
+
+Worker 的读取接口默认仍返回 JSON；`format=markdown|md` 返回 `text/markdown`，`format=text|txt` 和 `format=human` 返回 `text/plain`。视频接口也支持这四种格式。旧形式 `GET /https://x.com/user/status/123` 继续返回视频 URL JSON 数组。
 
 Worker 参数：
 

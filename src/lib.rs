@@ -50,6 +50,32 @@ mod worker_adapter {
         DEFAULT_TIMEOUT_MS,
     };
 
+    const HELP_TEXT: &str = r#"xread - 读取公开 X/Twitter 内容
+
+Usage:
+
+  GET /read?url=<X URL or status ID>
+  GET /videos?url=<X URL or status ID>
+  GET /health
+
+Options:
+
+  format=json|markdown|text|human       输出格式，默认 json
+  replies=direct|replies|thread         回复范围
+  limit=1..1000                         回复数量，默认 20
+  sort=relevance|recent                 回复排序，默认 relevance
+  quality=best|worst|144..4320          视频清晰度，默认 best
+  video=<1-based index>                 只选择第几个视频
+
+Examples:
+
+  /read?url=463440424141459456&format=markdown
+  /read?url=463440424141459456&replies=thread
+  /videos?url=463440424141459456&quality=720
+
+JSON help: /?format=json
+"#;
+
     #[derive(Debug, Default, Deserialize)]
     struct Query {
         url: Option<String>,
@@ -116,6 +142,12 @@ mod worker_adapter {
                 )
             }
         };
+        // Keep `/?url=...` working as an API shortcut, but make a plain visit
+        // to `/` useful to a person. Machine-readable discovery remains
+        // available explicitly through `/?format=json`.
+        if path == "/" && query.url.is_none() && !matches!(query.format.as_deref(), Some("json")) {
+            return body_response(HELP_TEXT.to_owned(), "text/plain; charset=utf-8");
+        }
         let operation = if path == "/videos" || !matches!(path.as_str(), "/" | "/read") {
             Operation::Videos
         } else {
