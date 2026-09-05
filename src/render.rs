@@ -180,7 +180,7 @@ fn markdown_post(post: &Post, include_provenance: bool) -> String {
     // Image URLs are intentionally omitted from the compact view: they are
     // easy to save from X and four long CDN URLs add substantial noise. Video
     // URLs are much more useful, so expose one best-quality MP4 per video/GIF.
-    let video_urls = post.video_urls();
+    let video_urls = post.own_video_urls_with_quality(crate::VideoQuality::Best);
     if !video_urls.is_empty() {
         let videos = video_urls
             .iter()
@@ -707,6 +707,35 @@ mod tests {
         assert!(!markdown.contains("https://video.example/480x852/low.mp4"));
         assert!(!markdown.contains("https://image.example/1.jpg"));
         assert!(!markdown.contains("https://image.example/video.jpg"));
+    }
+
+    #[test]
+    fn markdown_keeps_quoted_video_in_its_own_section() {
+        let mut result = sample_result();
+        result.post.media.clear();
+        let video_url = "https://video.example/quoted.mp4";
+        let mut quoted = result.post.clone();
+        quoted.id = Some("456".to_owned());
+        quoted.url = Some("https://x.com/ada/status/456".to_owned());
+        quoted.text = "The quoted video.".to_owned();
+        quoted.media.push(Media {
+            alt_text: None,
+            duration_ms: None,
+            height: None,
+            preview_image_url: None,
+            media_type: Some("video".to_owned()),
+            url: Some(video_url.to_owned()),
+            variants: Vec::new(),
+            width: None,
+        });
+        result.post.quoted_post = Some(Box::new(quoted));
+
+        let markdown = render_markdown(&result);
+        let (main_section, quoted_section) = markdown.split_once("## Quoted post").unwrap();
+        assert!(!main_section.contains("### Videos"));
+        assert!(!main_section.contains(video_url));
+        assert!(quoted_section.contains(video_url));
+        assert_eq!(markdown.matches(video_url).count(), 1);
     }
 
     #[test]

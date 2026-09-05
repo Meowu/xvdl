@@ -322,16 +322,40 @@ pub struct MediaVariant {
 }
 
 impl Post {
-    /// Return one directly downloadable URL for every video/GIF in this post.
+    /// Return one directly downloadable URL for every video/GIF in this post
+    /// and its already resolved quoted/reposted posts.
     ///
     /// FxTwitter may expose several encodings of one video. Picking the MP4
     /// variant with the greatest bitrate preserves xvdl's old "one URL per
     /// video" contract instead of returning every resolution as a new video.
+    /// Visit each post's own media first, then quotes, then reposts; duplicate
+    /// URLs keep their first position so existing main-post indexes stay stable.
     pub fn video_urls(&self) -> Vec<String> {
         self.video_urls_with_quality(VideoQuality::Best)
     }
 
     pub fn video_urls_with_quality(&self, quality: VideoQuality) -> Vec<String> {
+        let mut urls = Vec::new();
+        let mut pending = vec![self];
+        while let Some(post) = pending.pop() {
+            for url in post.own_video_urls_with_quality(quality) {
+                if !urls.contains(&url) {
+                    urls.push(url);
+                }
+            }
+            // LIFO traversal: visit a quote before the reposted branch.
+            if let Some(reposted) = post.reposted_post.as_deref() {
+                pending.push(reposted);
+            }
+            if let Some(quoted) = post.quoted_post.as_deref() {
+                pending.push(quoted);
+            }
+        }
+        urls
+    }
+
+    /// Keep each post's media attributed to its own section when rendering.
+    pub(crate) fn own_video_urls_with_quality(&self, quality: VideoQuality) -> Vec<String> {
         let mut urls = Vec::new();
         for media in &self.media {
             let selected = media.video_url_with_quality(quality);

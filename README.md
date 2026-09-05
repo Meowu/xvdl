@@ -58,6 +58,13 @@ Formats:
 
 ## Video URLs and downloads
 
+Video selection includes media in resolved quoted/reposted posts, even when the
+shared post has no video of its own. Each post's own videos come first, followed
+by its quotes and reposts recursively; duplicate URLs are removed. `quality`
+applies to every selected video, and the one-based `video` index uses this order.
+This behavior is shared by CLI URLs/downloads, Worker `/videos`, and the legacy
+`/<X URL>` route, whose JSON response remains an array of URLs.
+
 ```bash
 # One best-bitrate MP4 per video, one URL per line
 xread POST_URL --videos

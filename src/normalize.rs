@@ -1233,6 +1233,103 @@ mod tests {
 
     use super::*;
 
+    fn video_status(id: &str) -> Value {
+        json!({
+            "type": "status",
+            "id": id,
+            "text": "A video post",
+            "author": { "screen_name": "author" },
+            "media": { "all": [{
+                "type": "video",
+                "url": "https://image.example/thumbnail.jpg",
+                "formats": [
+                    { "container": "m3u8", "url": "https://video.example/playlist.m3u8" },
+                    { "container": "mp4", "bitrate": 256000,
+                      "url": format!("https://video.example/{id}/480x270/low.mp4") },
+                    { "container": "mp4", "bitrate": 2176000,
+                      "url": format!("https://video.example/{id}/1280x720/medium.mp4") },
+                    { "container": "mp4", "bitrate": 10368000,
+                      "url": format!("https://video.example/{id}/1920x1080/best.mp4") }
+                ]
+            }] }
+        })
+    }
+
+    #[test]
+    fn extracts_quoted_video_when_main_post_has_no_video() {
+        // Same relevant shape as /2/status/2096052256059826356: media is
+        // empty on the shared post; all downloadable formats live in quote.
+        let mut value = video_status("2096052256059826356");
+        value["media"] = json!({});
+        value["quote"] = video_status("2095436061707219008");
+
+        for media in [
+            json!({}),
+            json!({ "all": [{
+            "type": "photo", "url": "https://image.example/photo.jpg"
+        }] }),
+        ] {
+            value["media"] = media;
+            let post = normalize_community_post(&value, 0).unwrap();
+            assert_eq!(post.kind, "quote");
+            for (quality, representation) in [
+                (crate::VideoQuality::Best, "1920x1080/best"),
+                (crate::VideoQuality::Worst, "480x270/low"),
+                (crate::VideoQuality::Height(720), "1280x720/medium"),
+            ] {
+                assert_eq!(
+                    post.video_urls_with_quality(quality),
+                    vec![format!(
+                        "https://video.example/2095436061707219008/{representation}.mp4"
+                    )]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn collects_nested_videos_in_main_quote_repost_order_without_duplicates() {
+        let mut value = video_status("1");
+        value["quote"] = video_status("2");
+        value["quote"]["quote"] = video_status("3");
+        value["quote"]["quote"]["media"]["all"][0]["type"] = json!("gif");
+        // Upstreams can repeat a media item at multiple levels.
+        value["media"]["all"]
+            .as_array_mut()
+            .unwrap()
+            .push(video_status("2")["media"]["all"][0].clone());
+        let mut post = normalize_community_post(&value, 0).unwrap();
+        let mut reposted = normalize_community_post(&video_status("4"), 0).unwrap();
+        reposted.quoted_post = post.quoted_post.clone();
+        post.reposted_post = Some(Box::new(reposted));
+
+        assert_eq!(
+            post.video_urls(),
+            ["1", "2", "3", "4"]
+                .map(|id| { format!("https://video.example/{id}/1920x1080/best.mp4") })
+        );
+    }
+
+    #[test]
+    fn quoted_thumbnail_or_playlist_is_not_a_downloadable_video() {
+        let mut value = video_status("1");
+        value["media"] = json!({});
+        value["quote"] = video_status("2");
+        value["quote"]["media"]["all"][0]["formats"] = json!([{
+            "container": "m3u8", "url": "https://video.example/playlist.m3u8"
+        }]);
+        assert!(normalize_community_post(&value, 0)
+            .unwrap()
+            .video_urls()
+            .is_empty());
+
+        value["quote"] = Value::Null;
+        assert!(normalize_community_post(&value, 0)
+            .unwrap()
+            .video_urls()
+            .is_empty());
+    }
+
     #[test]
     fn normalizes_long_post_media_quote_and_links() {
         let value = json!({
